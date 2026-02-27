@@ -831,9 +831,18 @@ send_to_agent() {
 
 # ── Main ──
 
-# Get list of target agents
+# Get list of target agents - supports individual, "all", and @group names
 if [[ "$TARGET" == "all" ]]; then
     AGENTS=$(jq -r --arg me "$MY_AGENT" '.agents | keys[] | select(. != $me)' "$REGISTRY")
+elif [[ "$TARGET" == @* ]]; then
+    GROUP_NAME="${TARGET#@}"
+    GROUP_AGENTS=$(jq -r --arg g "$GROUP_NAME" --arg me "$MY_AGENT" \
+        '.groups[$g] // [] | .[] | select(. != $me)' "$REGISTRY" 2>/dev/null)
+    if [[ -z "$GROUP_AGENTS" ]]; then
+        echo -e "${RED}Unknown group: $TARGET (check groups in agent-registry.json)${NC}" >&2
+        exit 1
+    fi
+    AGENTS="$GROUP_AGENTS"
 else
     AGENTS="$TARGET"
 fi
