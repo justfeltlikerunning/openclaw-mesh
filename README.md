@@ -90,6 +90,10 @@ mesh-send.sh helper notification "Schema updated, please refresh"
 # Broadcast to all agents
 mesh-send.sh all notification "Fleet-wide maintenance window starting"
 
+# Broadcast to a group
+mesh-send.sh @work notification "Domain update: new schema correction"
+mesh-send.sh @personal notification "Calendar reminder"
+
 # Rally multiple agents (fan-out request)
 mesh-rally.sh "Status report please" --agents "helper,backup"
 ```
@@ -121,7 +125,8 @@ send_mesh_response "$MESH_REPLY_URL" "$MESH_REPLY_TOKEN" "$RESPONSE"
 | Alert deduplication | Groups alerts by host and check type, suppresses duplicates |
 | Audit logging | Every message logged to `logs/mesh-audit.jsonl` |
 | Rich attachments | Files (auto base64 if under 64KB) and URL references |
-| Broadcast and rally | Fan-out to all or selected agents |
+| Broadcast and rally | Fan-out to all, groups, or selected agents |
+| Broadcast groups | Named groups (@work, @personal, @security) for scoped messaging |
 
 ### Mesh Resilience (v2.0)
 
@@ -261,6 +266,32 @@ MESH supports automatic routing of responses back to the originating conversatio
 **Requirements:**
 - Sender's OpenClaw config: `hooks.allowRequestSessionKey: true`
 - Only the generic `/hooks/agent` endpoint reads session keys from POST body
+
+## Broadcast Groups
+
+Define named groups in `agent-registry.json` to scope broadcasts by domain:
+
+```json
+{
+  "groups": {
+    "work": ["agent-a", "agent-b", "agent-c"],
+    "personal": ["agent-d", "agent-e"],
+    "security": ["agent-f"],
+    "all": ["agent-a", "agent-b", "agent-c", "agent-d", "agent-e", "agent-f"]
+  }
+}
+```
+
+Then use `@group` syntax:
+
+```bash
+mesh-send.sh @work notification "New data correction deployed"
+mesh-send.sh @personal notification "Calendar reminder for tomorrow"
+mesh-send.sh @security notification "Vulnerability scan results"
+mesh-send.sh all notification "Fleet-wide: maintenance window"
+```
+
+Groups are extensible. Add new agents to the appropriate group as your fleet grows. Agents not in a group won't receive messages sent to that group.
 
 ## Alert Deduplication
 
