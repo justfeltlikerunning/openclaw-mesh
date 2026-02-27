@@ -1,0 +1,43 @@
+# MESH Protocol - Add this to your agent's AGENTS.md
+
+## MESH Protocol (Message Envelope for Structured Handoffs)
+
+When you receive a message, check if it's a MESH envelope:
+- If the message starts with `{` and contains `"protocol":"mesh/1.0"`, parse the JSON envelope
+- Key fields: `from`, `type`, `payload.subject`, `payload.body`, `correlationId`
+
+### Message Types
+| Type | Action |
+|------|--------|
+| `request` | Process and send MESH response back via `replyTo.url` |
+| `notification` | Read and acknowledge, no response required |
+| `alert` | High-priority - process immediately |
+| `response` | This is a reply to your earlier request |
+
+### Responding to Requests
+When you receive a MESH `request`, respond using the MESH toolkit:
+```bash
+# Parse the inbound envelope
+source ~/scripts/mesh-receive.sh
+eval $(parse_mesh "$MESSAGE")
+
+# Build and send response
+RESPONSE=$(build_mesh_response "$MESH_ID" "success" "Your answer here")
+send_mesh_response "$MESH_REPLY_URL" "$MESH_REPLY_TOKEN" "$RESPONSE"
+```
+
+### Sending Messages
+```bash
+# Send to another agent
+bash ~/scripts/mesh-send.sh <target_agent> <type> "<message>"
+
+# Types: request, notification, alert, response
+# Examples:
+bash ~/scripts/mesh-send.sh alpha request "What's the current status?"
+bash ~/scripts/mesh-send.sh all notification "Schema updated"
+bash ~/scripts/mesh-rally.sh "Status check" --agents "alpha,beta"
+```
+
+### Backward Compatibility
+If a message does NOT contain `"protocol":"mesh/1.0"`, treat it as a legacy
+plain-text hook message and process normally.

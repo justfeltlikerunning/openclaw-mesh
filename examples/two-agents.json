@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "agents": {
+    "alpha": {
+      "ip": "192.168.1.10",
+      "port": 18789,
+      "token": "alpha-token-change-me",
+      "role": "primary",
+      "hookPath": "/hooks"
+    },
+    "beta": {
+      "ip": "192.168.1.11",
+      "port": 18789,
+      "token": "beta-token-change-me",
+      "role": "secondary",
+      "hookPath": "/hooks"
+    }
+  }
+}

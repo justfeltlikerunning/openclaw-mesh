@@ -1,0 +1,28 @@
+# State files (contain runtime data)
+state/circuit-breakers.json
+state/dead-letters.json
+state/active-incidents.json
+
+# Logs
+logs/
+
+# Config with real tokens
+config/agent-registry.json
+config/identity
+
+# Keep template/example files
+!examples/
+!state/.gitkeep*
+
+# Signing keys (secrets!)
+config/signing-keys/
+
+# Encryption keys (secrets!)
+config/encryption-keys/
+
+# Collaborative sessions (runtime data)
+sessions/
+
+# Nonce replay log
+state/seen-nonces.log
+state/
