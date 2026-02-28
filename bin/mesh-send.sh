@@ -682,6 +682,32 @@ send_to_agent() {
     local body
     body=$(echo "$envelope" | jq -r '.payload.body // ""')
 
+    # ── Try Pulse WebSocket transport first ──────────────────────────────────
+    if [[ "${MESH_TRANSPORT:-auto}" != "http" ]]; then
+        # Try ShrimpNet hub first (single hub of comms), then direct pulse fallback
+        local shrimpnet_bridge="${SCRIPT_DIR:-$HOME/clawd/scripts}/mesh-shrimpnet-bridge.sh"
+        local bridge_script="${SCRIPT_DIR:-$HOME/clawd/scripts}/mesh-pulse-bridge.sh"
+        local used_bridge=""
+        if [[ -x "$shrimpnet_bridge" ]] && "$shrimpnet_bridge" "$agent" "$envelope" 2>/dev/null; then
+            used_bridge="shrimpnet"
+        elif [[ -x "$bridge_script" ]] && "$bridge_script" "$agent" "$envelope" 2>/dev/null; then
+            used_bridge="pulse"
+        fi
+        if [[ -n "$used_bridge" ]]; then
+            record_success "$agent"
+            audit_log "$MY_AGENT" "$agent" "$MSG_TYPE" "$msg_id" "$subject" "sent-${used_bridge}" "" "$body"
+            echo -e "${GREEN}✓ Sent to ${agent} via ShrimpNet (${used_bridge})${NC}" >&2
+            return 0
+        else
+            echo -e "${YELLOW}ShrimpNet + Pulse failed for ${agent} — falling back to HTTP${NC}" >&2
+            local queue_script="${SCRIPT_DIR:-$HOME/clawd/scripts}/mesh-pulse-queue.sh"
+            if [[ -x "$queue_script" ]]; then
+                "$queue_script" enqueue "$agent" "$envelope" 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    # ── HTTP webhook fallback ─────────────────────────────────────────────────
     # Wrap envelope in hook payload
     # sessionKey already extracted above for URL routing
     
@@ -735,6 +761,9 @@ send_to_agent() {
         if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
             record_success "$agent"
             audit_log "$MY_AGENT" "$agent" "$MSG_TYPE" "$msg_id" "$subject" "sent" "" "$body"
+            # Tap to ShrimpNet for agent-to-agent visibility
+            local tap_script="${SCRIPT_DIR:-$HOME/clawd/scripts}/mesh-tap.sh"
+            [[ -x "$tap_script" ]] && "$tap_script" "$MY_AGENT" "$agent" "$msg_id" "$MSG_TYPE" "$subject" "$body" "" &
             
             # If this is a response with a conversationId, notify the target's dashboard
             local resp_conv_id
@@ -813,6 +842,9 @@ send_to_agent() {
                 if [[ "$relay_code" =~ ^2[0-9][0-9]$ ]]; then
                     record_success "$agent"
                     audit_log "$MY_AGENT" "$agent" "$MSG_TYPE" "$msg_id" "$subject" "relayed_via_${relay}" "" "$body"
+                    # Tap to ShrimpNet for agent-to-agent visibility
+                    local tap_script="${SCRIPT_DIR:-$HOME/clawd/scripts}/mesh-tap.sh"
+                    [[ -x "$tap_script" ]] && "$tap_script" "$MY_AGENT" "$agent" "$msg_id" "$MSG_TYPE" "$subject" "$body" "" &
                     echo -e "${GREEN}✓ Relayed to ${agent} via ${relay} (HTTP ${relay_code}) - ${msg_id}${NC}" >&2
                     echo "$msg_id"
                     return 0
