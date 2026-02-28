@@ -37,7 +37,8 @@ curl -sf --max-time 5 -X POST "${SHRIMPNET_URL}/api/conversations/$(printf '%s' 
   -d "$(jq -n -c --arg agent_name "$AGENT" '{agent_name: $agent_name}')" >/dev/null 2>&1 || true
 
 # Post message — sender is FROM (ltdan etc), delivered to agent via ShrimpNet pulse
-# Using senderType "human" triggers postToAgent() which does pulse delivery
+# senderType "agent" so the UI renders it as an agent bubble (not as "Richard")
+# postToAgent fires for all messages with targets, regardless of senderType
 curl -sf --max-time 10 -X POST "${SHRIMPNET_URL}/api/messages" \
   -H "Content-Type: application/json" \
   -d "$(jq -n -c \
@@ -45,7 +46,7 @@ curl -sf --max-time 10 -X POST "${SHRIMPNET_URL}/api/messages" \
     --arg body "$BODY" \
     --arg conversationId "$CONV_ID" \
     --argjson targets "[\"${AGENT}\"]" \
-    '{sender: $sender, senderType: "human", body: $body, conversationId: $conversationId, targets: $targets}'
+    '{sender: $sender, senderType: "agent", body: $body, conversationId: $conversationId, targets: $targets}'
   )" >/dev/null 2>&1 && exit 0
 
 echo "ShrimpNet delivery failed" >&2
