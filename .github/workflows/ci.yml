@@ -1,0 +1,197 @@
+name: MESH CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq openssl curl
+          # Install bats (Bash Automated Testing System)
+          sudo apt-get install -y bats || {
+            git clone https://github.com/bats-core/bats-core.git /tmp/bats
+            sudo /tmp/bats/install.sh /usr/local
+          }
+
+      - name: Run BATS tests
+        run: |
+          export MESH_HOME="$(mktemp -d)"
+          export MESH_AGENT="ci-test"
+          
+          # Install MESH
+          bash install.sh --agent ci-test --home "$MESH_HOME" --no-timers
+          
+          # Run tests
+          if [ -d tests ] && ls tests/*.bats 1>/dev/null 2>&1; then
+            bats tests/*.bats
+          else
+            echo "No test files found - running smoke tests"
+          fi
+
+      - name: Smoke test - Install
+        run: |
+          TEST_HOME=$(mktemp -d)
+          bash install.sh --agent smoke-test --home "$TEST_HOME" --no-timers
+          
+          # Verify install created expected structure
+          test -f "$TEST_HOME/config/agent-registry.json" || exit 1
+          test -f "$TEST_HOME/config/identity" || exit 1
+          test -f "$TEST_HOME/bin/mesh-send.sh" || exit 1
+          test -f "$TEST_HOME/bin/mesh-join.sh" || exit 1
+          test -f "$TEST_HOME/bin/mesh-status.sh" || exit 1
+          test -f "$TEST_HOME/bin/mesh-queue.sh" || exit 1
+          test -f "$TEST_HOME/bin/mesh-discover.sh" || exit 1
+          test -f "$TEST_HOME/bin/mesh-export.sh" || exit 1
+          
+          # Verify identity
+          [ "$(cat $TEST_HOME/config/identity)" = "smoke-test" ] || exit 1
+          
+          # Verify registry structure
+          jq -e '.agents["smoke-test"]' "$TEST_HOME/config/agent-registry.json" > /dev/null || exit 1
+          
+          echo "✓ Install smoke test passed"
+
+      - name: Smoke test - Join
+        run: |
+          TEST_HOME=$(mktemp -d)
+          export MESH_HOME="$TEST_HOME"
+          export MESH_AGENT="alpha"
+          
+          bash install.sh --agent alpha --hub --home "$TEST_HOME" --no-timers
+          bash "$TEST_HOME/bin/mesh-join.sh" beta 10.0.0.2 18789 test-token
+          
+          # Verify beta was added
+          jq -e '.agents.beta' "$TEST_HOME/config/agent-registry.json" > /dev/null || exit 1
+          jq -e '.agents.beta.ip == "10.0.0.2"' "$TEST_HOME/config/agent-registry.json" > /dev/null || exit 1
+          
+          echo "✓ Join smoke test passed"
+
+      - name: Smoke test - Send (dry run)
+        run: |
+          TEST_HOME=$(mktemp -d)
+          export MESH_HOME="$TEST_HOME"
+          export MESH_AGENT="alpha"
+          
+          bash install.sh --agent alpha --home "$TEST_HOME" --no-timers
+          bash "$TEST_HOME/bin/mesh-join.sh" beta 10.0.0.2 18789 test-token
+          
+          # Dry-run send - should produce valid JSON envelope
+          OUTPUT=$(bash "$TEST_HOME/bin/mesh-send.sh" beta request "Hello from CI" --dry-run 2>&1)
+          echo "$OUTPUT" | grep -q '"protocol":"mesh/1.0"' || echo "$OUTPUT" | grep -q '"protocol": "mesh/1.0"' || exit 1
+          echo "$OUTPUT" | grep -q 'Hello from CI' || exit 1
+          
+          echo "✓ Send dry-run smoke test passed"
+
+      - name: Smoke test - Status
+        run: |
+          TEST_HOME=$(mktemp -d)
+          export MESH_HOME="$TEST_HOME"
+          export MESH_AGENT="alpha"
+          
+          bash install.sh --agent alpha --home "$TEST_HOME" --no-timers
+          
+          # Compact mode should work without errors
+          bash "$TEST_HOME/bin/mesh-status.sh" --compact || exit 1
+          
+          # JSON mode should produce valid JSON
+          bash "$TEST_HOME/bin/mesh-status.sh" --json | jq -e '.agent == "alpha"' > /dev/null || exit 1
+          
+          echo "✓ Status smoke test passed"
+
+      - name: Smoke test - Export
+        run: |
+          TEST_HOME=$(mktemp -d)
+          export MESH_HOME="$TEST_HOME"
+          export MESH_AGENT="alpha"
+          
+          bash install.sh --agent alpha --home "$TEST_HOME" --no-timers
+          
+          # Add a fake audit entry
+          echo '{"ts":"2026-01-01T00:00:00.000Z","from":"beta","to":"alpha","type":"request","status":"received","subject":"test"}' >> "$TEST_HOME/logs/mesh-audit.jsonl"
+          
+          # JSON export
+          RESULT=$(bash "$TEST_HOME/bin/mesh-export.sh" --from beta)
+          echo "$RESULT" | jq -e '.from == "beta"' > /dev/null || exit 1
+          
+          # CSV export
+          CSV=$(bash "$TEST_HOME/bin/mesh-export.sh" --csv)
+          echo "$CSV" | grep -q "beta" || exit 1
+          
+          echo "✓ Export smoke test passed"
+
+      - name: Smoke test - Generic Receiver
+        run: |
+          # Verify receiver starts and responds to health check
+          export MESH_AGENT="receiver-test"
+          export MESH_HOME=$(mktemp -d)
+          mkdir -p "$MESH_HOME/logs"
+          
+          python3 examples/receivers/generic-receiver.py --port 19876 &
+          RECV_PID=$!
+          sleep 2
+          
+          # Health check
+          HEALTH=$(curl -s http://localhost:19876/health)
+          echo "$HEALTH" | jq -e '.status == "ok"' > /dev/null || exit 1
+          echo "$HEALTH" | jq -e '.agent == "receiver-test"' > /dev/null || exit 1
+          
+          # Send a test message
+          curl -s -X POST http://localhost:19876/hooks/test \
+            -H "Content-Type: application/json" \
+            -d '{"message":"{\"protocol\":\"mesh/1.0\",\"from\":\"tester\",\"type\":\"notification\",\"payload\":{\"body\":\"hello\"}}"}' | jq -e '.ok == true' > /dev/null || exit 1
+          
+          # Check inbox
+          INBOX=$(curl -s http://localhost:19876/inbox)
+          echo "$INBOX" | jq -e '.count == 1' > /dev/null || exit 1
+          
+          kill $RECV_PID 2>/dev/null
+          echo "✓ Generic receiver smoke test passed"
+
+      - name: Smoke test - Session Router
+        run: |
+          TEST_HOME=$(mktemp -d)
+          export MESH_HOME="$TEST_HOME"
+          export MESH_AGENT="alpha"
+          
+          bash install.sh --agent alpha --home "$TEST_HOME" --no-timers
+          
+          # Start a session
+          bash "$TEST_HOME/bin/mesh-session-router.sh" start "test-collab" beta gamma
+          
+          # Verify session file exists
+          test -f "$TEST_HOME/sessions/test-collab.json" || exit 1
+          
+          # Check participants
+          jq -e '.participants | length == 3' "$TEST_HOME/sessions/test-collab.json" > /dev/null || exit 1
+          
+          # Receive a message
+          ENVELOPE='{"protocol":"mesh/1.0","id":"msg_1","from":"beta","to":"alpha","type":"request","session":{"key":"test-collab"},"payload":{"subject":"Test","body":"Hello from beta"}}'
+          OUTPUT=$(bash "$TEST_HOME/bin/mesh-session-router.sh" receive "$ENVELOPE" 2>/dev/null)
+          echo "$OUTPUT" | grep -q "SESSION_KEY=test-collab" || exit 1
+          
+          # Verify message was stored
+          MSG_COUNT=$(jq '.messages | length' "$TEST_HOME/sessions/test-collab.json")
+          [ "$MSG_COUNT" -eq 1 ] || exit 1
+          
+          # Get context
+          CONTEXT=$(bash "$TEST_HOME/bin/mesh-session-router.sh" context "test-collab")
+          echo "$CONTEXT" | grep -q "Hello from beta" || exit 1
+          
+          # List sessions
+          bash "$TEST_HOME/bin/mesh-session-router.sh" list --all | grep -q "test-collab" || exit 1
+          
+          # Close session
+          bash "$TEST_HOME/bin/mesh-session-router.sh" close "test-collab"
+          jq -e '.status == "closed"' "$TEST_HOME/sessions/test-collab.json" > /dev/null || exit 1
+          
+          echo "✓ Session router smoke test passed"

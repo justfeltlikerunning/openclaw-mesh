@@ -1,0 +1,29 @@
+{
+  "version": "2.0",
+  "agents": {
+    "hub": {
+      "ip": "10.0.0.10",
+      "port": 18789,
+      "token": "CHANGE-ME-hub-token",
+      "role": "hub",
+      "hookPath": "/hooks/hub",
+      "signing": true
+    },
+    "worker-1": {
+      "ip": "10.0.0.11",
+      "port": 18789,
+      "token": "CHANGE-ME-worker1-token",
+      "role": "peer",
+      "hookPath": "/hooks/hub",
+      "signing": true
+    },
+    "worker-2": {
+      "ip": "10.0.0.12",
+      "port": 18789,
+      "token": "CHANGE-ME-worker2-token",
+      "role": "sre",
+      "hookPath": "/hooks/hub",
+      "signing": true
+    }
+  }
+}
